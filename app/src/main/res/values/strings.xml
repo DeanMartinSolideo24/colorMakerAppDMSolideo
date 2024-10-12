@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">ColorMakerApp</string>
+    <string name="title_message">Color Maker App</string>
+    
+    <string name="portraitText">Portrait</string>
+    <string name="landscapeText">Landscape</string>
+</resources>
