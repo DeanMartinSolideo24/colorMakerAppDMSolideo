@@ -1,6 +1,5 @@
 package com.example.colormakerapp
 
-import android.graphics.Color
 import android.os.Bundle
 import android.view.View
 import android.widget.Button
@@ -11,32 +10,65 @@ import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
     // Declare the views
-    lateinit var displayColorView: View
-    lateinit var redSeekBar: SeekBar
-    lateinit var greenSeekBar: SeekBar
-    lateinit var blueSeekBar: SeekBar
-    lateinit var redSwitch: Switch
-    lateinit var greenSwitch: Switch
-    lateinit var blueSwitch: Switch
-    lateinit var resetButton: Button
-    lateinit var redValueTextView: TextView
-    lateinit var greenValueTextView: TextView
-    lateinit var blueValueTextView: TextView
+    private lateinit var displayColorView: View
+    private lateinit var redSeekBar: SeekBar
+    private lateinit var greenSeekBar: SeekBar
+    private lateinit var blueSeekBar: SeekBar
+    private lateinit var redSwitch: Switch
+    private lateinit var greenSwitch: Switch
+    private lateinit var blueSwitch: Switch
+    private lateinit var resetButton: Button
+    private lateinit var redValueTextView: TextView
+    private lateinit var greenValueTextView: TextView
+    private lateinit var blueValueTextView: TextView
 
     // Define the default starting values
     private val defaultRedValue = 0f
     private val defaultGreenValue = 0f
     private val defaultBlueValue = 0f
 
+    private lateinit var viewModel: MainActivityViewModel
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        displayColorView = findViewById(R.id.displayColor)         // Initialize Components
+        // Initialize UI components
+        initializeViews()
+
+        // Initialize ViewModel
+        viewModel = ViewModelProvider(this).get(MainActivityViewModel::class.java)
+
+        // Observe and restore persisted values
+        observePersistedValues()
+
+        // Setup listeners
+        setupSeekBarListeners()
+        setupSwitchListeners()
+        setupResetButton()
+
+        // Observe color changes
+        viewModel.color.observe(this) { newColor ->
+            displayColorView.setBackgroundColor(newColor)
+        }
+
+        // Handle window insets
+        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main)) { v, insets ->
+            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
+            insets
+        }
+    }
+
+    // Helper functions for setting up UI components
+    private fun initializeViews() {
+        displayColorView = findViewById(R.id.displayColor)
         redSeekBar = findViewById(R.id.seekbarRed)
         greenSeekBar = findViewById(R.id.seekbarGreen)
         blueSeekBar = findViewById(R.id.seekbarBlue)
@@ -47,30 +79,35 @@ class MainActivity : AppCompatActivity() {
         redValueTextView = findViewById(R.id.redValue)
         greenValueTextView = findViewById(R.id.greenValue)
         blueValueTextView = findViewById(R.id.blueValue)
+    }
 
-        setupSeekBarListeners()
-        setupSwitchListeners()
-
-        resetButton.setOnClickListener {         // Reset button function
-            resetToDefault()
-        }
-
-        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main)) { v, insets ->
-            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
-            insets
+    private fun observePersistedValues() { // Observe persisted values
+        lifecycleScope.launch {
+            viewModel.redValue.collect { red ->
+                redSeekBar.progress = (red * 100).toInt()
+            }
+            viewModel.greenValue.collect { green ->
+                greenSeekBar.progress = (green * 100).toInt()
+            }
+            viewModel.blueValue.collect { blue ->
+                blueSeekBar.progress = (blue * 100).toInt()
+            }
+            viewModel.redSwitchState.collect { checked ->
+                redSwitch.isChecked = checked
+            }
+            viewModel.greenSwitchState.collect { checked ->
+                greenSwitch.isChecked = checked
+            }
+            viewModel.blueSwitchState.collect { checked ->
+                blueSwitch.isChecked = checked
+            }
         }
     }
 
-    private fun setupSeekBarListeners() {
+    private fun setupSeekBarListeners() { // SeekBar listeners.
         val seekBarChangeListener = object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                val redValue = if (redSwitch.isChecked) redSeekBar.progress / 100f else 0f
-                val greenValue = if (greenSwitch.isChecked) greenSeekBar.progress / 100f else 0f
-                val blueValue = if (blueSwitch.isChecked) blueSeekBar.progress / 100f else 0f
-
-                updateDisplayColor(redValue, greenValue, blueValue)
-                updateValueTextViews(redValue, greenValue, blueValue)
+                updateColorValues()
             }
 
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
@@ -82,14 +119,10 @@ class MainActivity : AppCompatActivity() {
         blueSeekBar.setOnSeekBarChangeListener(seekBarChangeListener)
     }
 
+    // Switch listeners.
     private fun setupSwitchListeners() {
         val switchChangeListener = CompoundButton.OnCheckedChangeListener { _, _ ->
-            val redValue = if (redSwitch.isChecked) redSeekBar.progress / 100f else 0f
-            val greenValue = if (greenSwitch.isChecked) greenSeekBar.progress / 100f else 0f
-            val blueValue = if (blueSwitch.isChecked) blueSeekBar.progress / 100f else 0f
-
-            updateDisplayColor(redValue, greenValue, blueValue)
-            updateValueTextViews(redValue, greenValue, blueValue)
+            updateColorValues()
         }
 
         redSwitch.setOnCheckedChangeListener(switchChangeListener)
@@ -97,34 +130,44 @@ class MainActivity : AppCompatActivity() {
         blueSwitch.setOnCheckedChangeListener(switchChangeListener)
     }
 
-    // Function to reset to default color values and switch states
-    private fun resetToDefault() {
-        // Reset the switches
+    // Reset button listener.
+    private fun setupResetButton() {
+        resetButton.setOnClickListener {
+            resetToDefault()
+        }
+    }
+
+    // Update color values based on seek bar and switch values.
+    private fun updateColorValues() {
+        val redValue = redSeekBar.progress / 100f
+        val greenValue = greenSeekBar.progress / 100f
+        val blueValue = blueSeekBar.progress / 100f
+
+        viewModel.updateColor(
+            redValue,
+            greenValue,
+            blueValue,
+            redSwitch.isChecked,
+            greenSwitch.isChecked,
+            blueSwitch.isChecked
+        )
+
+        updateValueTextViews(redValue, greenValue, blueValue)
+    }
+
+    private fun resetToDefault() { // Reset to default values.
         redSwitch.isChecked = true
         greenSwitch.isChecked = true
         blueSwitch.isChecked = true
 
-        // Reset the seekbars to default values
-        redSeekBar.progress = (defaultRedValue).toInt()
-        greenSeekBar.progress = (defaultGreenValue).toInt()
-        blueSeekBar.progress = (defaultBlueValue).toInt()
+        redSeekBar.progress = (defaultRedValue * 100).toInt()
+        greenSeekBar.progress = (defaultGreenValue * 100).toInt()
+        blueSeekBar.progress = (defaultBlueValue * 100).toInt()
 
-        // Re-enable the seekbars
-        redSeekBar.isEnabled = true
-        greenSeekBar.isEnabled = true
-        blueSeekBar.isEnabled = true
-
-        // Reset the display color to default
-        updateDisplayColor(defaultRedValue, defaultGreenValue, defaultBlueValue)
-        updateValueTextViews(defaultRedValue, defaultGreenValue, defaultBlueValue)
+        updateColorValues()
     }
 
-    // Function to update the display color
-    private fun updateDisplayColor(red: Float, green: Float, blue: Float) {
-        val color = Color.rgb((red * 255).toInt(), (green * 255).toInt(), (blue * 255).toInt())
-        displayColorView.setBackgroundColor(color)
-    }
-
+    // Update the text views with the current color values.
     private fun updateValueTextViews(red: Float, green: Float, blue: Float) {
         redValueTextView.text = String.format("%.2f", red)
         greenValueTextView.text = String.format("%.2f", green)
